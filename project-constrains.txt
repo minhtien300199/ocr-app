@@ -1,0 +1,5 @@
+Project Constrains:
+1. Use the latest version of Python.
+2. Use the latest version of Flask.
+3. Do not remove comment or code critical for the application.
+4. Do not change the existing code structure if you must.

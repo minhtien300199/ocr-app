@@ -1,0 +1,62 @@
+[Role] expert
+
+[Task] improve
+
+[Context] technical
+
+[Output Requirements]
+- Format: Bullet points
+- Type: List
+- Length: Comprehensive yet concise, ideally 5-7 bullet points
+- Style: Clear and concise language, easily understandable
+- Structure: Well-organized with distinct sections for each component
+
+[Evaluation Criteria]
+- Accuracy: Ensure all technical specifications are correct and relevant
+- Clarity: Use straightforward language that avoids ambiguity
+- Practicality: Provide actionable steps that can be realistically implemented
+
+[Constraints]
+- Keep language simple and accessible to a broad audience
+- Avoid technical jargon unless it is essential for understanding
+- Be specific and actionable in instructions
+- Focus on key requirements to achieve the desired outcome
+
+---
+
+**Optimized Prompt:**
+
+- **Create a Python Flask Application:**
+  - Set up a new Flask project using a virtual environment.
+  - Install necessary libraries including Flask, Keras, and keras-ocr.
+
+- **Initialize the Keras-OCR Model:**
+  - Import the keras-ocr library and initialize the model.
+  - Ensure that all required dependencies are installed.
+
+- **Create APIs for Model Access:**
+  - Develop two RESTful API endpoints:
+    1. **Pre-trained Model API:**
+       - Endpoint: `/api/pretrained`
+       - Method: POST
+       - Input: Image data (base64 encoded or file upload)
+       - Output: Detected text in JSON format.
+    2. **Self-trained Model API:**
+       - Endpoint: `/api/selftrained`
+       - Method: POST
+       - Input: Image data (base64 encoded or file upload)
+       - Output: Detected text in JSON format.
+
+- **Develop User Interface (UI):**
+  - Create a simple web interface using HTML/CSS and JavaScript.
+  - Implement a file upload feature for image inputs.
+  - Display results from the API in a user-friendly format.
+
+- **Testing and Validation:**
+  - Ensure that both APIs return accurate results with appropriate error handling.
+  - Test the UI for usability and responsiveness.
+
+- **Documentation:**
+  - Write clear documentation for setting up and using the application, including API usage examples.
+
+Each of these steps should be implemented with a focus on clarity and practicality, ensuring that the application is user-friendly and effective in its function.

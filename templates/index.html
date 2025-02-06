@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR Application</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+    <div class="container">
+        <h1>OCR Application</h1>
+
+        <div class="nav-section">
+            <a href="/swagger" class="api-docs-link">API Documentation</a>
+        </div>
+
+        <div class="upload-section">
+            <h2>Input Image</h2>
+
+            <!-- Tab navigation -->
+            <div class="tab-nav">
+                <button class="tab-btn active" data-tab="file">File Upload</button>
+                <button class="tab-btn" data-tab="clipboard">Clipboard</button>
+                <button class="tab-btn" data-tab="url">URL</button>
+            </div>
+
+            <!-- File Upload Tab -->
+            <div class="tab-content active" id="file-tab">
+                <input type="file" id="imageInput" accept="image/*">
+                <div class="drag-drop-zone" id="dragDropZone">
+                    or drag and drop image here
+                </div>
+            </div>
+
+            <!-- Clipboard Tab -->
+            <div class="tab-content" id="clipboard-tab">
+                <div class="clipboard-zone" id="clipboardZone">
+                    Press Ctrl+V to paste image from clipboard
+                </div>
+            </div>
+
+            <!-- URL Tab -->
+            <div class="tab-content" id="url-tab">
+                <input type="url" id="imageUrl" placeholder="Enter image URL">
+                <button onclick="loadImageFromUrl()">Load Image</button>
+            </div>
+
+            <div class="process-buttons">
+                <button onclick="processImage('pretrained')">Process with Pre-trained Model</button>
+                <button onclick="processImage('selftrained')">Process with Self-trained Model</button>
+            </div>
+        </div>
+
+        <div class="preview-section">
+            <h2>Image Preview</h2>
+            <img id="imagePreview" src="" alt="Preview" style="display: none;">
+        </div>
+
+        <div class="results-section">
+            <h2>Results</h2>
+            <div id="results"></div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+
+</html>

@@ -1,0 +1,12 @@
+ocr_app/
+├── venv/
+├── static/
+│   ├── css/
+│   │   └── style.css
+│   └── js/
+│       └── main.js
+├── templates/
+│   └── index.html
+├── app.py
+├── requirements.txt
+└── README.md 
