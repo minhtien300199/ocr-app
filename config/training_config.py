@@ -1,5 +1,15 @@
 import os
-import torch
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# API configuration
+API_CONFIG = {
+    'openai_api_key': os.getenv('OPENAI_API_KEY'),
+    'openai_org_id': os.getenv('OPENAI_ORG_ID'),
+    'project_id': os.getenv('PROJECT_ID', 'proj_g3utYELQzj5kL2MmI90ue20v')  # Add project ID with default value
+}
 
 # Training configuration
 TRAINING_CONFIG = {
@@ -7,16 +17,27 @@ TRAINING_CONFIG = {
     'epochs': 50,
     'learning_rate': 0.001,
     'validation_split': 0.2,
-    'image_size': (224, 224),  # Standard size for vision transformers
+    'image_size': (224, 224),  # Standard size for vision models
     'max_text_length': 512,    # Maximum text length for GPT processing
 }
 
 # Model configuration
 MODEL_CONFIG = {
-    'model_name': 'microsoft/gpt-4-vision-mini',  # or your preferred vision-language model
-    'device': 'cuda' if torch.cuda.is_available() else 'cpu',
+    'model_name': 'gpt-4o-mini',
+    'api_key': API_CONFIG['openai_api_key'],
+    'org_id': API_CONFIG['openai_org_id'],
+    'project_id': API_CONFIG['project_id'],  # Add project ID to model config
     'temperature': 0.7,
-    'max_new_tokens': 512,
+    'max_tokens': 512,
+    'top_p': 1.0,
+    'frequency_penalty': 0.0,
+    'presence_penalty': 0.0
+}
+
+# Image configuration
+IMAGE_CONFIG = {
+    'max_size': 2048,  # Maximum image dimension
+    'quality': 'high',  # Image detail level (high/low)
 }
 
 # Dataset configuration

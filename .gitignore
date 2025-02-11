@@ -87,4 +87,9 @@ temp/
 *.h5
 *.pkl
 *.model
-*.bin 
+*.bin
+
+# Environment variables
+.env
+.env.local
+.env.* 

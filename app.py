@@ -1,20 +1,19 @@
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from flask_restx import Api, Resource, fields
-import torch
-from transformers import AutoProcessor, AutoModelForVision2Seq
+from openai import OpenAI
 import numpy as np
 import base64
 from PIL import Image
 import io
 import os
-from config.training_config import DATASET_CONFIG, MODEL_CONFIG, MODEL_PATHS
+from config.training_config import MODEL_CONFIG, IMAGE_CONFIG
 
 app = Flask(__name__)
 
-# Create API with url_prefix to avoid conflict with the default route
+# Create API with url_prefix
 api = Api(app, version='1.0', 
     title='OCR API',
-    description='A GPT-4-OCR API with support for Vietnamese and English',
+    description='An OCR API with support for Vietnamese and English',
     doc='/swagger',
     prefix='/api'
 )
@@ -22,10 +21,21 @@ api = Api(app, version='1.0',
 # Create namespaces
 ns_ocr = api.namespace('', description='OCR operations')
 
-# Initialize model and processor
-processor = AutoProcessor.from_pretrained(MODEL_CONFIG['model_name'])
-model = AutoModelForVision2Seq.from_pretrained(MODEL_CONFIG['model_name'])
-model.to(MODEL_CONFIG['device'])
+# Initialize OpenAI client - Remove organization parameter if it's empty
+client = OpenAI(
+    api_key=MODEL_CONFIG['api_key'],
+    default_headers={
+        "X-Project-ID": MODEL_CONFIG['project_id']
+    }
+) if not MODEL_CONFIG['org_id'] else OpenAI(
+    api_key=MODEL_CONFIG['api_key'],
+    organization=MODEL_CONFIG['org_id'],
+    default_headers={
+        "X-Project-ID": MODEL_CONFIG['project_id']
+    }
+)
+print("OpenAI API Key:", client.api_key)
+print("OpenAI organization:", client.organization)
 
 # Define models for Swagger documentation
 error_model = api.model('Error', {
@@ -41,59 +51,94 @@ results_model = api.model('Results', {
     'results': fields.List(fields.Nested(result_model))
 })
 
-def process_image(image_data, text_level='word'):
-    """Process image data using GPT-4-OCR model"""
+def prepare_image(image_data):
+    """Prepare image for API submission"""
     try:
-        # Convert image data to PIL Image
-        if isinstance(image_data, str) and image_data.startswith('data:image'):
+        # Convert to PIL Image if needed
+        if isinstance(image_data, bytes):
+            image = Image.open(io.BytesIO(image_data))
+        elif isinstance(image_data, str) and image_data.startswith('data:image'):
             image_data = image_data.split('base64,')[1]
-            image_data = base64.b64decode(image_data)
-        
-        image = Image.open(io.BytesIO(image_data))
-        
+            image = Image.open(io.BytesIO(base64.b64decode(image_data)))
+        else:
+            return None
+
         # Convert to RGB if necessary
         if image.mode != 'RGB':
             image = image.convert('RGB')
-        
+
+        # Resize if too large
+        if max(image.size) > IMAGE_CONFIG['max_size']:
+            ratio = IMAGE_CONFIG['max_size'] / max(image.size)
+            new_size = tuple(int(dim * ratio) for dim in image.size)
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
+
+        # Convert to base64
+        buffered = io.BytesIO()
+        image.save(buffered, format="JPEG")
+        return base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+    except Exception as e:
+        print(f"Error preparing image: {str(e)}")
+        return None
+
+def process_image(image_data, text_level='word'):
+    """Process image data using OpenAI's GPT-4 Vision model"""
+    try:
+        # Prepare image
+        base64_image = prepare_image(image_data)
+        if not base64_image:
+            return {'error': 'Failed to process image'}
+
         # Prepare prompt based on text level
         prompts = {
-            'word': "Extract individual words from this image:",
-            'paragraph': "Extract paragraphs from this image:",
-            'block': "Extract text blocks from this image:"
+            'word': "Extract individual words from this image. Return them as a comma-separated list.",
+            'paragraph': "Extract paragraphs from this image. Separate each paragraph with a double newline.",
+            'block': "Extract text blocks from this image. Separate each block with a newline."
         }
         prompt = prompts.get(text_level, prompts['word'])
-        
-        # Process image with the model
-        inputs = processor(
-            images=image,
-            text=prompt,
-            return_tensors="pt"
-        ).to(MODEL_CONFIG['device'])
-        
-        # Generate output
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=MODEL_CONFIG['max_new_tokens'],
-                temperature=MODEL_CONFIG['temperature']
-            )
-        
-        # Decode output
-        generated_text = processor.decode(outputs[0], skip_special_tokens=True)
-        
+
+        # Call OpenAI API
+        response = client.chat.completions.create(
+            model=MODEL_CONFIG['model_name'],
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}",
+                                "detail": IMAGE_CONFIG['quality']
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=MODEL_CONFIG['max_tokens'],
+            temperature=MODEL_CONFIG['temperature'],
+            top_p=MODEL_CONFIG['top_p'],
+            frequency_penalty=MODEL_CONFIG['frequency_penalty'],
+            presence_penalty=MODEL_CONFIG['presence_penalty']
+        )
+
+        # Extract text from response
+        generated_text = response.choices[0].message.content
+
         # Process results based on text level
         if text_level == 'word':
-            words = generated_text.split()
+            words = [w.strip() for w in generated_text.split(',') if w.strip()]
             results = [{'text': word, 'confidence': 0.95} for word in words]
         elif text_level == 'paragraph':
-            paragraphs = generated_text.split('\n\n')
-            results = [{'text': para.strip(), 'confidence': 0.95} for para in paragraphs if para.strip()]
+            paragraphs = [p.strip() for p in generated_text.split('\n\n') if p.strip()]
+            results = [{'text': para, 'confidence': 0.95} for para in paragraphs]
         else:  # block
-            blocks = generated_text.split('\n')
-            results = [{'text': block.strip(), 'confidence': 0.95} for block in blocks if block.strip()]
-        
+            blocks = [b.strip() for b in generated_text.split('\n') if b.strip()]
+            results = [{'text': block, 'confidence': 0.95} for block in blocks]
+
         return results if results else [{'text': 'No text detected', 'confidence': 0.0}]
-        
+
     except Exception as e:
         print(f"Error in process_image: {str(e)}")
         return {'error': str(e)}
@@ -163,7 +208,7 @@ class SelfTrainedOCR(Resource):
         help='Image file to process'))
     def post(self):
         try:
-            if not os.path.exists(MODEL_PATHS['best_model_path']):
+            if not os.path.exists(MODEL_CONFIG['best_model_path']):
                 return {'results': [], 'message': 'No trained model available'}, 501
                 
             if 'file' not in request.files:
