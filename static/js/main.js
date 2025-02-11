@@ -111,6 +111,10 @@ function processImage(modelType) {
     const formData = new FormData();
     formData.append('file', currentImage);
 
+    // Get selected text level
+    const textLevel = document.getElementById('textLevel').value;
+    formData.append('text_level', textLevel);
+
     // Show loading state
     resultsDiv.innerHTML = 'Processing...';
 

@@ -1,27 +1,31 @@
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from flask_restx import Api, Resource, fields
-import easyocr
+import torch
+from transformers import AutoProcessor, AutoModelForVision2Seq
 import numpy as np
 import base64
 from PIL import Image
 import io
 import os
+from config.training_config import DATASET_CONFIG, MODEL_CONFIG, MODEL_PATHS
 
 app = Flask(__name__)
 
 # Create API with url_prefix to avoid conflict with the default route
 api = Api(app, version='1.0', 
     title='OCR API',
-    description='A simple OCR API with support for Vietnamese and English',
+    description='A GPT-4-OCR API with support for Vietnamese and English',
     doc='/swagger',
     prefix='/api'
 )
 
-# Create namespaces - update the namespace to remove 'api' prefix since we added it above
+# Create namespaces
 ns_ocr = api.namespace('', description='OCR operations')
 
-# Initialize the EasyOCR reader (only need to do this once)
-reader = easyocr.Reader(['vi','en'])
+# Initialize model and processor
+processor = AutoProcessor.from_pretrained(MODEL_CONFIG['model_name'])
+model = AutoModelForVision2Seq.from_pretrained(MODEL_CONFIG['model_name'])
+model.to(MODEL_CONFIG['device'])
 
 # Define models for Swagger documentation
 error_model = api.model('Error', {
@@ -37,34 +41,61 @@ results_model = api.model('Results', {
     'results': fields.List(fields.Nested(result_model))
 })
 
-def process_image(image_data):
-    """Process image data and return detected text"""
+def process_image(image_data, text_level='word'):
+    """Process image data using GPT-4-OCR model"""
     try:
-        # Convert image data to format required by easyocr
+        # Convert image data to PIL Image
         if isinstance(image_data, str) and image_data.startswith('data:image'):
-            # Handle base64 encoded image
             image_data = image_data.split('base64,')[1]
             image_data = base64.b64decode(image_data)
         
-        # Convert bytes to image
         image = Image.open(io.BytesIO(image_data))
-        # Convert to numpy array
-        image_array = np.array(image)
         
-        # Perform OCR
-        results = reader.readtext(image_array)
+        # Convert to RGB if necessary
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
         
-        # Format results
-        formatted_results = []
-        for (bbox, text, prob) in results:
-            formatted_results.append({
-                'text': text,
-                'confidence': float(prob)
-            })
+        # Prepare prompt based on text level
+        prompts = {
+            'word': "Extract individual words from this image:",
+            'paragraph': "Extract paragraphs from this image:",
+            'block': "Extract text blocks from this image:"
+        }
+        prompt = prompts.get(text_level, prompts['word'])
         
-        return formatted_results
-    
+        # Process image with the model
+        inputs = processor(
+            images=image,
+            text=prompt,
+            return_tensors="pt"
+        ).to(MODEL_CONFIG['device'])
+        
+        # Generate output
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=MODEL_CONFIG['max_new_tokens'],
+                temperature=MODEL_CONFIG['temperature']
+            )
+        
+        # Decode output
+        generated_text = processor.decode(outputs[0], skip_special_tokens=True)
+        
+        # Process results based on text level
+        if text_level == 'word':
+            words = generated_text.split()
+            results = [{'text': word, 'confidence': 0.95} for word in words]
+        elif text_level == 'paragraph':
+            paragraphs = generated_text.split('\n\n')
+            results = [{'text': para.strip(), 'confidence': 0.95} for para in paragraphs if para.strip()]
+        else:  # block
+            blocks = generated_text.split('\n')
+            results = [{'text': block.strip(), 'confidence': 0.95} for block in blocks if block.strip()]
+        
+        return results if results else [{'text': 'No text detected', 'confidence': 0.0}]
+        
     except Exception as e:
+        print(f"Error in process_image: {str(e)}")
         return {'error': str(e)}
 
 @app.route('/')
@@ -81,26 +112,39 @@ class PretrainedOCR(Resource):
             400: ('Validation Error', error_model),
             500: ('Internal Server Error', error_model)
         })
-    @ns_ocr.expect(api.parser().add_argument('file', 
-        location='files',
-        type='file',
-        required=True,
-        help='Image file to process'))
+    @ns_ocr.expect(api.parser()
+        .add_argument('file', 
+            location='files',
+            type='file',
+            required=True,
+            help='Image file to process')
+        .add_argument('text_level',
+            location='form',
+            type=str,
+            required=False,
+            default='word',
+            choices=['block', 'paragraph', 'word'],
+            help='Level of text detection'))
     def post(self):
         try:
-            if 'file' not in request.files and 'image' not in request.json:
+            if 'file' not in request.files:
                 return {'error': 'No image provided'}, 400
 
-            if 'file' in request.files:
-                image_file = request.files['file']
-                image_data = image_file.read()
-            else:
-                image_data = request.json['image']
-
-            results = process_image(image_data)
+            image_file = request.files['file']
+            if not image_file.filename:
+                return {'error': 'Empty file provided'}, 400
+            
+            text_level = request.form.get('text_level', 'word')
+            image_data = image_file.read()
+            results = process_image(image_data, text_level=text_level)
+            
+            if isinstance(results, dict) and 'error' in results:
+                return results, 500
+                
             return {'results': results}
 
         except Exception as e:
+            print(f"Error in API endpoint: {str(e)}")
             return {'error': str(e)}, 500
 
 @ns_ocr.route('/selftrained')
@@ -108,12 +152,38 @@ class SelfTrainedOCR(Resource):
     """Endpoint for self-trained model OCR"""
     @ns_ocr.doc('selftrained_ocr',
         responses={
-            501: ('Not Implemented', error_model)
+            200: ('Success', results_model),
+            400: ('Validation Error', error_model),
+            500: ('Internal Server Error', error_model)
         })
+    @ns_ocr.expect(api.parser().add_argument('file', 
+        location='files',
+        type='file',
+        required=True,
+        help='Image file to process'))
     def post(self):
-        """Self-trained model endpoint (to be implemented)"""
-        # Return empty results array instead of message
-        return {'results': []}, 501
+        try:
+            if not os.path.exists(MODEL_PATHS['best_model_path']):
+                return {'results': [], 'message': 'No trained model available'}, 501
+                
+            if 'file' not in request.files:
+                return {'error': 'No image provided'}, 400
+
+            image_file = request.files['file']
+            if not image_file.filename:
+                return {'error': 'Empty file provided'}, 400
+                
+            image_data = image_file.read()
+            results = process_image(image_data)
+            
+            if isinstance(results, dict) and 'error' in results:
+                return results, 500
+                
+            return {'results': results}
+
+        except Exception as e:
+            print(f"Error in API endpoint: {str(e)}")
+            return {'error': str(e)}, 500
 
 # Serve static files
 @app.route('/static/<path:path>')
